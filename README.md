@@ -30,22 +30,35 @@ Cada dado tiene dos caras doradas que otorgan un **token de favor**. Con esos to
 - **Jarl** — heurísticas razonables.
 - **Rey** — cuenta tus dados, juega para rematarte y elige combos de dioses con sinergia.
 
+## 1vs1 online
+
+Crea una sala, pásale el código de 6 caracteres a tu rival y a jugar. Va sobre **Supabase Realtime** (solo canales: no hay base de datos ni cuentas).
+
+El truco: los dos navegadores ejecutan **el mismo motor con la misma semilla**, así que por la red solo viajan las decisiones (qué dados te quedas, qué favor invocas) y nunca los dados. Eso mantiene ambas pantallas idénticas sin servidor de juego.
+
+> **Nota de confianza:** está pensado para jugar con amigos. Al compartirse la semilla, alguien decidido podría leer el código y predecir sus propias tiradas. Para partidas competitivas con desconocidos haría falta mover el azar a un servidor.
+
 ## Estructura
 
 ```
-index.html        shell (carga los scripts en orden)
-css/styles.css    estética nórdica, dados 3D en CSS
-js/gods.js        datos de los 20 dioses
-js/engine.js      motor de juego puro (sin DOM, determinista)
-js/ai.js          IA (3 niveles)
-js/ui.js          interfaz, animaciones y sonido
-tests/test.html   batería de tests del motor (ábrela en el navegador)
-SPEC.md           especificación de diseño completa
+index.html               shell (carga los scripts en orden)
+css/styles.css           estética nórdica, dados 3D en CSS
+js/gods.js               datos de los 20 dioses
+js/engine.js             motor de juego puro (sin DOM, determinista)
+js/ai.js                 IA (3 niveles)
+js/net.js                salas y sincronía online (Supabase Realtime)
+js/ui.js                 interfaz, animaciones y sonido
+tests/test.html          batería de tests del motor
+tests/realtime-test.html prueba de conexión online
+SPEC.md                  especificación de diseño completa
 ```
 
 ## Tests
 
-Abre `tests/test.html` en el navegador: ejecuta la batería de pruebas del motor (reglas, favores, empates, y partidas simuladas IA contra IA).
+Ábrelos en el navegador:
+
+- `tests/test.html` — pruebas del motor (reglas, favores, empates, y partidas simuladas IA contra IA).
+- `tests/realtime-test.html` — comprueba que las salas online conectan, se ven entre sí y no se filtran mensajes entre salas.
 
 ## Créditos
 
