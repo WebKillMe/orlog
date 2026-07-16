@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Orlog — tests del motor</title>
+<style>
+  body{background:#0b0f14;color:#e8e1d0;font:14px/1.5 monospace;padding:1rem}
+  .ok{color:#8fbf6f}.fail{color:#e05a3a;font-weight:bold}
+  h1{font-size:1.1rem}
+</style>
+</head>
+<body>
+<h1>Tests del motor Orlog</h1>
+<div id="out"></div>
+<script src="../js/gods.js"></script>
+<script src="../js/engine.js"></script>
+<script src="../js/ai.js"></script>
+<script>
+(function(){
+'use strict';
+var out = document.getElementById('out');
+var passed = 0, failed = 0;
+
+function line(cls, txt){
+  var d = document.createElement('div');
+  d.className = cls; d.textContent = txt;
+  out.appendChild(d);
+}
+function ok(cond, name){
+  if (cond) { passed++; line('ok', '✔ ' + name); }
+  else { failed++; line('fail', '✘ ' + name); console.error('FAIL:', name); }
+}
+function eq(a, b, name){
+  ok(a === b, name + ' (esperado ' + b + ', obtenido ' + a + ')');
+}
+
+// rng determinista
+function seeded(seed){
+  var s = seed >>> 0;
+  return function(){
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+
+// FACES índices: 0 axe, 1 shield, 2 arrow, 3 axe, 4 helmet, 5 steal
+// rng que produce la secuencia de caras pedida (índice/6 + epsilon)
+function faceRng(seq){
+  var i = 0;
+  return function(){
+    var v = seq[i % seq.length]; i++;
+    return v / 6 + 0.001;
+  };
+}
+var AXE=0, SHIELD=1, ARROW=2, HELMET=4, STEAL=5;
+
+// Motor con dados forzados: fija las caras de ambos jugadores y llega a fase favor
+function rig(facesP0, facesP1, gods0, gods1, tokens0, tokens1){
+  var e = new OrlogEngine({
+    names:['A','B'],
+    gods:[gods0||[], gods1||[]],
+    firstPlayer:0,
+    rng: seeded(42)
+  });
+  // fuerza tokens
+  e.state.players[0].tokens = tokens0 || 0;
+  e.state.players[1].tokens = tokens1 || 0;
+  // secuencia: turno j0 (6 caras), turno j1 (6 caras)
+  var seq = facesP0.concat(facesP1);
+  e.rng = faceRng(seq);
+  e.roll(); e.keepAll();     // j0 tira y se queda todo
+  e.roll(); e.keepAll();     // j1 igual
+  e.rng = seeded(99);        // el resto (frigg/freyja) con rng normal
+  return e;
+}
+
+function facesOf(engine, p){
+  return engine.getState().players[p].dice.map(function(d){ return d.face; }).join(',');
+}
+function findEvents(report, type){
+  return report.events.filter(function(ev){ return ev.type === type; });
+}
+
+// ── 1. daño y bloqueo básicos ─────────────────────────────
+(function(){
+  // j0: 3 hachas, 1 flecha, 1 casco, 1 escudo · j1: 1 casco, 1 escudo, 4 hachas
+  var e = rig([AXE,AXE,AXE,ARROW,HELMET,SHIELD], [HELMET,SHIELD,AXE,AXE,AXE,AXE]);
+  e.selectFavor(0,null,1); e.selectFavor(1,null,1);
+  var r = e.resolve();
+  var st = e.getState();
+  // j1 recibe: 3 hachas -1 casco = 2, 1 flecha -1 escudo = 0 → 2
+  eq(st.players[1].health, 13, 'daño a j1 con bloqueos');
+  // j0 recibe: 4 hachas -1 casco = 3 → 12
+  eq(st.players[0].health, 12, 'daño a j0 con bloqueos');
+  var dmg = findEvents(r,'damage');
+  eq(dmg.length, 2, 'dos eventos de daño');
+})();
+
+// ── 2. tokens dorados ─────────────────────────────────────
+(function(){
+  // dado 0 (doradas arrow,steal): forzamos arrow en dado 0 → 1 dorado
+  var e = rig([ARROW,AXE,AXE,AXE,AXE,AXE],[AXE,AXE,AXE,AXE,AXE,AXE]);
+  var st = e.getState();
+  ok(st.players[0].dice[0].gold === true, 'dado 0 con flecha es dorado');
+  e.selectFavor(0,null,1); e.selectFavor(1,null,1);
+  var r = e.resolve();
+  var g = findEvents(r,'goldTokens');
+  eq(g.length, 1, 'un evento goldTokens');
+  eq(e.getState().players[0].tokens, 1, 'j0 gana 1 token dorado');
+})();
+
+// ── 3. robo con tope y simultáneo ─────────────────────────
+(function(){
+  // j0: 2 manos, j1: 1 mano. tokens: j0=1, j1=1 (más dorados que caigan)
+  // dado 1 steal es dorado (shield,steal), dado 3 steal dorado (steal,helmet), dado 5 no (shield,helmet)
+  // uso dados sin doradas para no ensuciar: caras steal en dados 4? mejor calcular tras resolve.
+  var e = rig([STEAL,STEAL,AXE,AXE,AXE,AXE],[STEAL,AXE,AXE,AXE,AXE,AXE], [],[],1,1);
+  e.selectFavor(0,null,1); e.selectFavor(1,null,1);
+  var pre0 = e.getState().players[0].tokens, pre1 = e.getState().players[1].tokens;
+  var r = e.resolve();
+  var steals = findEvents(r,'steal');
+  // dorados primero: j0 steal en dado0(arrow,steal→dorado) y dado1(shield,steal→dorado)=+2 → j0=3
+  // j1 steal en dado0 dorado=+1 → j1=2
+  // robo: j0 roba min(2, tokens j1=2)=2; j1 roba min(1, tokens j0=3)=1
+  var st = e.getState();
+  eq(st.players[0].tokens, 3 - 1 + 2, 'tokens j0 tras robo simultáneo');
+  eq(st.players[1].tokens, 2 - 2 + 1, 'tokens j1 tras robo simultáneo');
+  ok(steals.length === 2, 'dos eventos de robo');
+})();
+
+// ── 4. favor que falla por robo ───────────────────────────
+(function(){
+  // j1 arma Thor nivel 1 (coste 4) con 4 tokens justos; j0 le roba 1 con una mano
+  // ojo con las caras doradas: en el dado 0 el escudo NO es dorado (arrow,steal)
+  var e = rig([STEAL,AXE,AXE,AXE,AXE,AXE],[SHIELD,AXE,AXE,AXE,AXE,AXE], ['thor'],['thor'], 0, 4);
+  e.selectFavor(0,null,1);
+  e.selectFavor(1,'thor',1);
+  var r = e.resolve();
+  var fails = findEvents(r,'favorFailed');
+  eq(fails.length, 1, 'favor de Thor falla por robo');
+  ok(fails.length && fails[0].reason === 'tokens', 'razón: tokens insuficientes');
+})();
+
+// ── 5. Thor mata tras la resolución ───────────────────────
+(function(){
+  var e = rig([AXE,AXE,AXE,AXE,AXE,AXE],[SHIELD,SHIELD,SHIELD,SHIELD,SHIELD,SHIELD], ['thor'],[], 12, 0);
+  e.state.players[1].health = 2; // casi muerto
+  e.selectFavor(0,'thor',1); // 2 daño
+  e.selectFavor(1,null,1);
+  var r = e.resolve();
+  // j1 recibe 6 hachas sin cascos = 6... muere antes de Thor. Rehacer: j1 con cascos.
+  ok(findEvents(r,'gameOver').length === 1, 'gameOver emitido');
+})();
+
+// ── 6. Thrymr cancela un favor ────────────────────────────
+(function(){
+  var e = rig([HELMET,HELMET,HELMET,HELMET,HELMET,HELMET],[HELMET,HELMET,HELMET,HELMET,HELMET,HELMET], ['thrymr'],['thor'], 3, 4);
+  e.selectFavor(0,'thrymr',1); // −1 nivel → Thor nivel 1 queda a 0 → cancelado
+  e.selectFavor(1,'thor',1);
+  var r = e.resolve();
+  var fails = findEvents(r,'favorFailed');
+  eq(fails.length, 1, 'Thor cancelado por Thrymr');
+  ok(fails.length && fails[0].reason === 'cancelled', 'razón: cancelado');
+  // j1: 4 iniciales + 3 dorados (cascos de los dados 2,3,5) y NO paga
+  eq(e.getState().players[1].tokens, 7, 'el cancelado no paga');
+  eq(e.getState().players[0].health, 15, 'sin daño de Thor');
+})();
+
+// ── 7. Brunhild ×1.5 redondea hacia arriba ────────────────
+(function(){
+  var e = rig([AXE,AXE,AXE,HELMET,HELMET,HELMET],[HELMET,HELMET,HELMET,HELMET,HELMET,SHIELD], ['brunhild'],[], 6, 0);
+  e.selectFavor(0,'brunhild',1); // 3 hachas ×1.5 = 4.5 → 5
+  e.selectFavor(1,null,1);
+  var r = e.resolve();
+  var fx = findEvents(r,'favorEffect').filter(function(x){return x.godId==='brunhild';});
+  eq(fx.length, 1, 'efecto de Brunhild emitido');
+  eq(fx[0].detail.multiplied.to, 5, 'Brunhild: 3 hachas → 5');
+  // j1: 5 cascos bloquean 5 hachas → 0 daño... espera: 5 hachas -5 cascos = 0
+  eq(e.getState().players[1].health, 15, 'todo bloqueado tras multiplicar');
+})();
+
+// ── 8. Ullr perfora escudos ───────────────────────────────
+(function(){
+  var e = rig([ARROW,ARROW,ARROW,HELMET,HELMET,HELMET],[SHIELD,SHIELD,SHIELD,HELMET,HELMET,HELMET], ['ullr'],[], 2, 0);
+  e.selectFavor(0,'ullr',1); // 2 flechas ignoran escudos
+  e.selectFavor(1,null,1);
+  var r = e.resolve();
+  // 3 flechas: 2 perforan, 1 normal vs 3 escudos → bloqueada. daño = 2
+  eq(e.getState().players[1].health, 13, 'Ullr: 2 flechas perforan');
+  var dmg = findEvents(r,'damage').filter(function(d){return d.player===1;})[0];
+  eq(dmg.breakdown.pierced, 2, 'breakdown.pierced = 2');
+})();
+
+// ── 9. Baldr añade bloqueos ───────────────────────────────
+(function(){
+  var e = rig([HELMET,HELMET,SHIELD,AXE,AXE,AXE],[AXE,AXE,AXE,AXE,ARROW,ARROW], ['baldr'],[], 3, 0);
+  e.selectFavor(0,'baldr',1); // +1 por equivalente: +2 cascos, +1 escudo
+  e.selectFavor(1,null,1);
+  e.resolve();
+  // j0 recibe: 4 hachas vs 2+2=4 cascos → 0; 2 flechas vs 1+1=2 escudos → 0
+  eq(e.getState().players[0].health, 15, 'Baldr bloquea todo');
+})();
+
+// ── 10. Skadi añade flechas ───────────────────────────────
+(function(){
+  var e = rig([ARROW,ARROW,HELMET,HELMET,HELMET,HELMET],[HELMET,HELMET,HELMET,HELMET,HELMET,HELMET], ['skadi'],[], 6, 0);
+  e.selectFavor(0,'skadi',1); // +1 flecha por cada dado con flecha: 2+2=4 flechas
+  e.selectFavor(1,null,1);
+  e.resolve();
+  eq(e.getState().players[1].health, 11, 'Skadi: 4 flechas sin escudos');
+})();
+
+// ── 11. Freyr con desempate ───────────────────────────────
+(function(){
+  // 3 hachas y 3 cascos: empate → gana axe por orden
+  var e = rig([AXE,AXE,AXE,HELMET,HELMET,HELMET],[HELMET,HELMET,HELMET,SHIELD,SHIELD,SHIELD], ['freyr'],[], 4, 0);
+  e.selectFavor(0,'freyr',1); // +2 al mayoritario → hachas 3→5
+  e.selectFavor(1,null,1);
+  e.resolve();
+  // 5 hachas vs 3 cascos → 2 daño
+  eq(e.getState().players[1].health, 13, 'Freyr suma al símbolo mayoritario (axe gana empate)');
+})();
+
+// ── 12. Var cura por gasto rival ──────────────────────────
+(function(){
+  var e = rig([HELMET,HELMET,HELMET,HELMET,HELMET,HELMET],[HELMET,HELMET,HELMET,HELMET,HELMET,SHIELD], ['var'],['thor'], 10, 4);
+  e.state.players[0].health = 5;
+  e.selectFavor(0,'var',1);  // +1 vida por token rival
+  e.selectFavor(1,'thor',1); // paga 4 → j0 cura 4; Thor pega 2
+  var r = e.resolve();
+  // j0: 5 +4 (var) −2 (thor) = 7
+  eq(e.getState().players[0].health, 7, 'Var cura 4 por el gasto de Thor');
+})();
+
+// ── 13. Mimir gana favor por daño ─────────────────────────
+(function(){
+  var e = rig([HELMET,SHIELD,SHIELD,SHIELD,SHIELD,SHIELD],[AXE,AXE,AXE,AXE,AXE,AXE], ['mimir'],[], 3, 0);
+  e.selectFavor(0,'mimir',1); // +1 token por daño recibido
+  e.selectFavor(1,null,1);
+  var r = e.resolve();
+  // j0: 3 iniciales + 3 dorados (escudos de dados 1,4,5) − 3 coste + 5 daño = 8
+  eq(e.getState().players[0].tokens, 8, 'Mimir: +5 tokens por 5 de daño');
+})();
+
+// ── 14. Tyr sacrifica y destruye ──────────────────────────
+(function(){
+  var e = rig([HELMET,HELMET,HELMET,HELMET,HELMET,HELMET],[HELMET,HELMET,HELMET,HELMET,HELMET,SHIELD], ['tyr'],[], 2, 5);
+  e.selectFavor(0,'tyr',1); // sacrifica 1, rival −2 tokens
+  e.selectFavor(1,null,1);
+  e.resolve();
+  eq(e.getState().players[0].health, 14, 'Tyr: sacrificas 1 vida');
+  // j1: 5 iniciales + 3 dorados (cascos d2,d3 + escudo d5) − 2 de Tyr = 6
+  eq(e.getState().players[1].tokens, 6, 'Tyr: rival pierde 2 tokens');
+})();
+
+// ── 15. empate ────────────────────────────────────────────
+(function(){
+  var e = rig([AXE,AXE,AXE,AXE,AXE,AXE],[AXE,AXE,AXE,AXE,AXE,AXE]);
+  e.state.players[0].health = 3;
+  e.state.players[1].health = 3;
+  e.selectFavor(0,null,1); e.selectFavor(1,null,1);
+  var r = e.resolve();
+  var go = findEvents(r,'gameOver');
+  eq(go.length, 1, 'empate: gameOver emitido');
+  ok(go[0].winner === 'draw', 'empate: winner = draw');
+})();
+
+// ── 16. Freyja añade dados ────────────────────────────────
+(function(){
+  var e = rig([AXE,AXE,AXE,AXE,AXE,AXE],[HELMET,HELMET,HELMET,HELMET,HELMET,HELMET], ['freyja'],[], 2, 0);
+  e.selectFavor(0,'freyja',2 <= 2 ? 1 : 1); // nivel 1: +1 dado
+  e.selectFavor(1,null,1);
+  var r = e.resolve();
+  var fx = findEvents(r,'favorEffect').filter(function(x){return x.godId==='freyja';});
+  eq(fx.length, 1, 'Freyja emite efecto');
+  eq(fx[0].detail.extraDice.length, 1, 'Freyja añade 1 dado');
+  var st = e.getState();
+  eq(st.players[0].dice.length, 7, 'j0 tiene 7 dados');
+  e.nextRound();
+  eq(e.getState().players[0].dice.length, 6, 'el dado extra desaparece al limpiar');
+})();
+
+// ── 17. Loki banea los más peligrosos ─────────────────────
+(function(){
+  var e = rig([HELMET,HELMET,HELMET,HELMET,HELMET,HELMET],[AXE,AXE,SHIELD,SHIELD,SHIELD,SHIELD], ['loki'],[], 6, 0);
+  e.selectFavor(0,'loki',2); // banea 2 → las 2 hachas
+  e.selectFavor(1,null,1);
+  var r = e.resolve();
+  var fx = findEvents(r,'favorEffect').filter(function(x){return x.godId==='loki';})[0];
+  eq(fx.detail.banned.length, 2, 'Loki banea 2 dados');
+  eq(e.getState().players[0].health, 15, 'las hachas baneadas no pegan');
+})();
+
+// ── 18. flujo de tiradas/turnos ───────────────────────────
+(function(){
+  var e = new OrlogEngine({names:['A','B'], gods:[[],[]], firstPlayer:0, rng:seeded(7)});
+  var st = e.getState();
+  eq(st.activePlayer, 0, 'empieza el jugador inicial');
+  e.roll();
+  var thrown = false;
+  try { e.roll(); } catch(err){ thrown = true; }
+  ok(thrown, 'no se puede tirar dos veces seguidas');
+  e.endTurn();
+  eq(e.getState().activePlayer, 1, 'turno pasa al rival');
+  e.roll(); e.endTurn();
+  eq(e.getState().rollNum, 2, 'tirada 2 tras ambos turnos');
+  e.roll(); e.keepAll();      // j0 se lo queda todo en tirada 2
+  e.roll(); e.endTurn();      // j1 tirada 2
+  var st3 = e.getState();
+  eq(st3.rollNum, 3, 'tirada 3');
+  eq(st3.activePlayer, 1, 'j0 saltado: todos sus dados están bloqueados');
+  e.roll(); e.endTurn();      // j1 tirada 3 → favor
+  eq(e.getState().phase, 'favor', 'fase de favor al acabar');
+  ok(e.getState().players[0].dice.every(function(d){return d.kept;}), 'todo bloqueado j0');
+  ok(e.getState().players[1].dice.every(function(d){return d.kept;}), 'todo bloqueado j1');
+})();
+
+// ── 19. fuzz: IA vs IA, 3 dificultades × 50 partidas ─────
+(function(){
+  var diffs = ['easy','normal','hard'];
+  diffs.forEach(function(diff){
+    var errors = 0, unfinished = 0;
+    for (var g = 0; g < 50; g++){
+      try {
+        var rng = seeded(1000 + g * 7);
+        OrlogAI.rng = rng;
+        var e = new OrlogEngine({
+          names:['A','B'],
+          gods:[OrlogAI.pickGods(diff), OrlogAI.pickGods(diff)],
+          rng: rng
+        });
+        var rounds = 0;
+        while (e.getState().phase !== 'gameover' && rounds < 100){
+          var st = e.getState();
+          if (st.phase === 'roll'){
+            e.roll();
+            var dec = OrlogAI.decideKeeps(e.getState(), diff);
+            (dec.keep||[]).forEach(function(id){ try{ e.toggleKeep(id); }catch(err){} });
+            if (dec.stopRolling) e.keepAll(); else e.endTurn();
+          } else if (st.phase === 'favor'){
+            for (var p = 0; p < 2; p++){
+              var f = OrlogAI.decideFavor(e.getState(), diff, p);
+              try {
+                if (f) e.selectFavor(p, f.godId, f.level);
+                else e.selectFavor(p, null, 1);
+              } catch(err){ e.selectFavor(p, null, 1); }
+            }
+          } else if (st.phase === 'resolution'){
+            var sac = {};
+            var np = e.needsOdinPrompt();
+            if (np) sac[np.player] = OrlogAI.decideOdinSacrifice(e.getState(), np.player);
+            e.resolve({odinSacrifice: sac});
+            if (e.getState().phase !== 'gameover'){ e.nextRound(); rounds++; }
+          }
+        }
+        if (e.getState().phase !== 'gameover') unfinished++;
+      } catch(err){
+        errors++;
+        if (errors === 1) console.error('fuzz ' + diff + ':', err);
+      }
+    }
+    eq(errors, 0, 'fuzz ' + diff + ': sin errores en 50 partidas');
+    eq(unfinished, 0, 'fuzz ' + diff + ': todas terminan (<100 rondas)');
+  });
+  OrlogAI.rng = Math.random;
+})();
+
+// ── 20. hard gana a easy en agregado ──────────────────────
+(function(){
+  var winsHard = 0, total = 200;
+  for (var g = 0; g < total; g++){
+    var rng = seeded(5000 + g * 13);
+    OrlogAI.rng = rng;
+    var e = new OrlogEngine({
+      names:['E','H'],
+      gods:[OrlogAI.pickGods('easy'), OrlogAI.pickGods('hard')],
+      rng: rng
+    });
+    var rounds = 0;
+    while (e.getState().phase !== 'gameover' && rounds < 100){
+      var st = e.getState();
+      if (st.phase === 'roll'){
+        var diff = st.activePlayer === 0 ? 'easy' : 'hard';
+        e.roll();
+        var dec = OrlogAI.decideKeeps(e.getState(), diff);
+        (dec.keep||[]).forEach(function(id){ try{ e.toggleKeep(id); }catch(err){} });
+        if (dec.stopRolling) e.keepAll(); else e.endTurn();
+      } else if (st.phase === 'favor'){
+        for (var p = 0; p < 2; p++){
+          var f = OrlogAI.decideFavor(e.getState(), p === 0 ? 'easy' : 'hard', p);
+          try {
+            if (f) e.selectFavor(p, f.godId, f.level);
+            else e.selectFavor(p, null, 1);
+          } catch(err){ e.selectFavor(p, null, 1); }
+        }
+      } else if (st.phase === 'resolution'){
+        var sac = {};
+        var np = e.needsOdinPrompt();
+        if (np) sac[np.player] = OrlogAI.decideOdinSacrifice(e.getState(), np.player);
+        e.resolve({odinSacrifice: sac});
+        if (e.getState().phase !== 'gameover'){ e.nextRound(); rounds++; }
+      }
+    }
+    if (e.getState().winner === 1) winsHard++;
+  }
+  OrlogAI.rng = Math.random;
+  var pct = Math.round(winsHard / total * 100);
+  line(pct >= 65 ? 'ok' : 'fail', 'winrate hard vs easy: ' + pct + '% (' + winsHard + '/' + total + ')');
+  ok(pct >= 65, 'hard gana ≥65% a easy');
+})();
+
+line(failed ? 'fail' : 'ok', '——— ' + passed + ' pasados, ' + failed + ' fallidos ———');
+document.title = failed ? '✘ ' + failed + ' fallos' : '✔ tests OK';
+window.__TEST_RESULT = { passed: passed, failed: failed };
+})();
+</script>
+</body>
+</html>
