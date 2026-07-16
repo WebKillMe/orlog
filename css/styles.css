@@ -1174,6 +1174,97 @@ button { font: inherit; color: inherit; }
 
 .mute-btn:hover { border-color: var(--gold); box-shadow: 0 0 12px rgba(212, 169, 78, .35); }
 
+.help-btn {
+  position: fixed;
+  top: .7rem;
+  left: .7rem;
+  z-index: 95;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-family: var(--serif);
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--gold);
+  cursor: pointer;
+  background: rgba(15, 20, 27, .8);
+  border: 1px solid rgba(212, 169, 78, .35);
+  transition: border-color .3s, box-shadow .3s;
+}
+
+.help-btn:hover { border-color: var(--gold); box-shadow: 0 0 12px rgba(212, 169, 78, .35); }
+
+/* ── Instrucciones ─────────────────────────────────────────────────────── */
+
+.help-panel {
+  width: min(680px, 100%);
+  max-height: 92vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.4rem 1.6rem 1.6rem;
+  border-radius: 16px;
+  background: linear-gradient(170deg, #1a2129, #10151c);
+  border: 1px solid var(--gold-dim);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .7);
+}
+
+.help-title {
+  font-family: var(--display);
+  font-size: clamp(1.3rem, 5vw, 1.9rem);
+  letter-spacing: .06em;
+  color: var(--bone);
+  text-align: center;
+  text-shadow: 0 0 18px rgba(212, 169, 78, .4);
+}
+
+.help-body { display: flex; flex-direction: column; gap: 1.1rem; }
+
+.help-body h4 {
+  font-family: var(--serif);
+  font-variant: small-caps;
+  letter-spacing: .12em;
+  color: var(--gold);
+  font-size: 1.05rem;
+  margin-bottom: .35rem;
+}
+
+.help-body p, .help-body li { line-height: 1.55; opacity: .92; }
+
+.help-body ol, .help-body ul {
+  padding-left: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+}
+
+.help-faces { display: flex; flex-direction: column; gap: .55rem; }
+
+.help-face { display: flex; align-items: center; gap: .7rem; }
+
+.help-ic {
+  flex: 0 0 auto;
+  width: 2.1rem;
+  height: 2.1rem;
+  display: grid;
+  place-items: center;
+  color: var(--bone);
+  background: rgba(212, 169, 78, .08);
+  border: 1px solid var(--gold-dim);
+  border-radius: 8px;
+}
+
+.help-ic svg { width: 20px; height: 20px; }
+
+.help-face-txt { font-size: .92rem; line-height: 1.4; }
+
+.help-tips { border-top: 1px solid rgba(212, 169, 78, .2); padding-top: .8rem; }
+
+.help-close { align-self: center; margin-top: .4rem; }
+
 /* ── Responsive ────────────────────────────────────────────────────────── */
 
 @media (max-width: 560px) {

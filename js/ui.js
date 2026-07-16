@@ -262,6 +262,15 @@
     });
     this.root.appendChild(this.muteBtn);
 
+    this.helpBtn = el('button', 'help-btn', '?');
+    this.helpBtn.setAttribute('aria-label', 'Cómo se juega');
+    this.helpBtn.title = 'Cómo se juega';
+    this.helpBtn.addEventListener('click', function () {
+      self.sound.play('click');
+      self.openHelp();
+    });
+    this.root.appendChild(this.helpBtn);
+
     this._buildTitle();
     this._buildDifficulty();
     this._buildDraft();
@@ -300,7 +309,73 @@
       self.showScreen('difficulty');
     });
     s.appendChild(play);
+
+    var help = el('button', 'btn btn-ghost', 'Cómo se juega');
+    help.addEventListener('click', function () {
+      self.sound.play('click');
+      self.openHelp();
+    });
+    s.appendChild(help);
+
     s.appendChild(el('div', 'rune-frieze bottom', 'ᛈ ᛇ ᛉ ᛊ ᛏ ᛒ ᛖ ᛗ ᛚ ᛜ ᛞ ᛟ'));
+  };
+
+  OrlogUI.prototype.openHelp = function () {
+    var self = this;
+    function faceRow(face, title, desc) {
+      return '<div class="help-face">' +
+        '<span class="help-ic">' + (ICONS[face] || '') + '</span>' +
+        '<span class="help-face-txt"><b>' + title + '</b>' + desc + '</span></div>';
+    }
+    var ov = el('div', 'overlay help-overlay');
+    var panel = el('div', 'help-panel');
+    panel.innerHTML =
+      '<h3 class="help-title">Cómo se juega a Orlog</h3>' +
+      '<div class="help-body">' +
+        '<section><h4>El objetivo</h4><p>Cada jugador empieza con <b>15 piedras de vida</b>. ' +
+          'Gana quien deje al rival sin ninguna. Se juega por rondas.</p></section>' +
+        '<section><h4>Una ronda, paso a paso</h4><ol>' +
+          '<li><b>Tiradas.</b> Tienes 6 dados y tres tiradas. Tras cada tirada eliges qué dados ' +
+            '<b>te quedas</b> (se bloquean) y vuelves a tirar el resto. Tú y el rival os turnáis.</li>' +
+          '<li><b>Favor.</b> Si tienes tokens, puedes invocar el favor de un dios. Es opcional.</li>' +
+          '<li><b>Resolución.</b> Se aplican los dados y los favores a la vez: los ataques ' +
+            'que no se bloquean quitan vida.</li>' +
+        '</ol></section>' +
+        '<section><h4>Las caras del dado</h4><div class="help-faces">' +
+          faceRow('axe', 'Hacha', ' — 1 de daño cuerpo a cuerpo. La bloquea un casco.') +
+          faceRow('arrow', 'Flecha', ' — 1 de daño a distancia. La bloquea un escudo.') +
+          faceRow('helmet', 'Casco', ' — bloquea un hacha rival.') +
+          faceRow('shield', 'Escudo', ' — bloquea una flecha rival.') +
+          faceRow('steal', 'Mano', ' — roba un token de favor al rival.') +
+        '</div></section>' +
+        '<section><h4>Tokens de favor</h4><p>Los consigues de dos formas: con las ' +
+          '<b>caras doradas</b> (borde punteado) de tus dados, y <b>robándolos</b> con las manos. ' +
+          'Con ellos pagas los favores de los dioses.</p></section>' +
+        '<section><h4>Favores de los dioses</h4><p>Antes de jugar eliges 3 dioses. En la fase de ' +
+          'favor gastas tokens para invocar uno, con tres niveles de potencia (más tokens, más ' +
+          'efecto): daño directo, curación, robo, multiplicar tus hachas, anular dados del rival… ' +
+          'Un favor <b>falla</b> si te roban los tokens antes de pagarlo.</p></section>' +
+        '<section><h4>Cómo se cuenta el daño</h4><p>Se resuelve para los dos a la vez: ' +
+          '<b>hachas − cascos del rival</b> y <b>flechas − escudos del rival</b>. ' +
+          'Lo que sobre, resta vida. Si lo bloqueas todo, no recibes daño.</p></section>' +
+        '<section class="help-tips"><h4>Consejos</h4><ul>' +
+          '<li>Si el rival guarda muchas hachas, quédate cascos para frenarlas.</li>' +
+          '<li>Las caras doradas alimentan tus favores: no las malgastes.</li>' +
+          '<li>Ahorrar para un favor de nivel alto suele rentar más que gastar pronto.</li>' +
+        '</ul></section>' +
+      '</div>';
+    var close = el('button', 'btn btn-primary help-close', 'Entendido');
+    function teardown() {
+      ov.remove();
+      document.removeEventListener('keydown', onKey);
+    }
+    function onKey(e) { if (e.key === 'Escape') teardown(); }
+    close.addEventListener('click', function () { self.sound.play('click'); teardown(); });
+    panel.appendChild(close);
+    ov.addEventListener('click', function (e) { if (e.target === ov) teardown(); });
+    document.addEventListener('keydown', onKey);
+    ov.appendChild(panel);
+    document.body.appendChild(ov);
   };
 
   OrlogUI.prototype._buildDifficulty = function () {
