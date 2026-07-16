@@ -46,3 +46,7 @@ SPEC.md           especificación de diseño completa
 ## Tests
 
 Abre `tests/test.html` en el navegador: ejecuta la batería de pruebas del motor (reglas, favores, empates, y partidas simuladas IA contra IA).
+
+## Créditos
+
+Concepto original de Ubisoft© en *Assassin's Creed Valhalla®*. Esta es una recreación no oficial, hecha por afición y sin ánimo de lucro.

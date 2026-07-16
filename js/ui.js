@@ -318,6 +318,8 @@
     s.appendChild(help);
 
     s.appendChild(el('div', 'rune-frieze bottom', 'ᛈ ᛇ ᛉ ᛊ ᛏ ᛒ ᛖ ᛗ ᛚ ᛜ ᛞ ᛟ'));
+    s.appendChild(el('p', 'title-credit',
+      'Concepto original de Ubisoft© en Assassin’s Creed Valhalla®'));
   };
 
   OrlogUI.prototype.openHelp = function () {
