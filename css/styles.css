@@ -1207,6 +1207,138 @@ button { font: inherit; color: inherit; }
 
 .help-btn:hover { border-color: var(--gold); box-shadow: 0 0 12px rgba(212, 169, 78, .35); }
 
+/* ── Sala online ───────────────────────────────────────────────────────── */
+
+.btn-online {
+  border-color: var(--ice, #7fb3c8);
+  color: var(--ice, #7fb3c8);
+}
+
+.btn-online:hover {
+  box-shadow: 0 0 16px rgba(127, 179, 200, .4);
+  background: rgba(127, 179, 200, .1);
+}
+
+.sala-panel {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  gap: 1.4rem;
+  flex-wrap: wrap;
+  width: min(720px, 100%);
+}
+
+.sala-bloque {
+  flex: 1 1 260px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .8rem;
+  padding: 1.3rem 1.1rem;
+  border-radius: 14px;
+  background: linear-gradient(170deg, #1a2129, #10151c);
+  border: 1px solid var(--gold-dim);
+}
+
+.sala-h3 {
+  font-family: var(--serif);
+  font-variant: small-caps;
+  letter-spacing: .12em;
+  color: var(--gold);
+  font-size: 1rem;
+}
+
+.sala-o {
+  display: grid;
+  place-items: center;
+  font-family: var(--serif);
+  font-variant: small-caps;
+  letter-spacing: .1em;
+  opacity: .45;
+}
+
+.sala-join { display: flex; gap: .5rem; flex-wrap: wrap; justify-content: center; }
+
+.sala-input {
+  font-family: var(--serif);
+  font-size: 1.3rem;
+  font-weight: 700;
+  letter-spacing: .32em;
+  text-indent: .32em;
+  text-align: center;
+  text-transform: uppercase;
+  width: 7.5em;
+  padding: .45em .3em;
+  border-radius: 10px;
+  color: var(--bone);
+  background: rgba(5, 8, 12, .7);
+  border: 1px solid var(--gold-dim);
+}
+
+.sala-input:focus {
+  outline: none;
+  border-color: var(--gold);
+  box-shadow: 0 0 14px rgba(212, 169, 78, .3);
+}
+
+.sala-codigo-caja {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .35rem;
+  margin-top: 1.2rem;
+  padding: 1rem 1.8rem;
+  border-radius: 14px;
+  background: rgba(212, 169, 78, .07);
+  border: 1px solid var(--gold);
+  box-shadow: 0 0 26px rgba(212, 169, 78, .18);
+}
+
+.sala-codigo-label,
+.sala-codigo-hint {
+  font-family: var(--serif);
+  font-variant: small-caps;
+  letter-spacing: .12em;
+  font-size: .78rem;
+  opacity: .65;
+}
+
+.sala-codigo {
+  font-family: var(--display);
+  font-size: clamp(2rem, 9vw, 3rem);
+  font-weight: 900;
+  letter-spacing: .16em;
+  text-indent: .16em;
+  color: var(--gold);
+  text-shadow: 0 0 22px rgba(212, 169, 78, .5);
+  user-select: all;
+}
+
+.btn-copiar { margin-top: .3rem; font-size: .8rem; }
+
+.sala-estado {
+  margin-top: .9rem;
+  font-family: var(--serif);
+  letter-spacing: .06em;
+  text-align: center;
+  min-height: 1.4em;
+  opacity: .85;
+}
+
+.sala-estado.error { color: var(--blood); opacity: 1; }
+.sala-estado.ok { color: #8fbf6f; opacity: 1; }
+.sala-estado.esperando::after {
+  content: '';
+  animation: puntitos 1.4s steps(4, end) infinite;
+}
+
+@keyframes puntitos {
+  0% { content: ''; }
+  25% { content: '.'; }
+  50% { content: '..'; }
+  75% { content: '...'; }
+}
+
 /* ── Instrucciones ─────────────────────────────────────────────────────── */
 
 .help-panel {

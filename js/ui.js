@@ -217,9 +217,17 @@
 
     this.engine = null;
     this.difficulty = null;
-    this.aiName = 'Jarl';
+    this.foeName = 'Jarl';
     this.lastConfig = null;
     this.gameToken = 0;
+
+    // 'ai' = contra la máquina · 'online' = 1vs1 por internet
+    this.mode = 'ai';
+    // índice del motor que ocupo yo; el rival es el otro. Yo siempre me pinto abajo.
+    this.me = 0;
+    this.foe = 1;
+    this.net = null;
+    this.sala = null;
 
     this.mirror = { health: [15, 15], tokens: [0, 0] };
     this.stats = { dmg: [0, 0], rounds: 1 };
@@ -242,6 +250,7 @@
     this.screens = {
       title: el('section', 'screen screen-title'),
       difficulty: el('section', 'screen screen-difficulty'),
+      sala: el('section', 'screen screen-sala'),
       draft: el('section', 'screen screen-draft'),
       board: el('section', 'screen screen-board'),
       end: el('section', 'screen screen-end')
@@ -273,6 +282,7 @@
 
     this._buildTitle();
     this._buildDifficulty();
+    this._buildSala();
     this._buildDraft();
   };
 
@@ -303,12 +313,24 @@
     s.appendChild(el('h1', 'title-word', 'ORLOG'));
     s.appendChild(el('p', 'title-sub', 'El juego de dados del destino'));
 
-    var play = el('button', 'btn btn-primary btn-big', 'Jugar');
+    var play = el('button', 'btn btn-primary btn-big', 'Contra la máquina');
     play.addEventListener('click', function () {
       self.sound.play('click');
+      self.mode = 'ai';
+      self.me = 0; self.foe = 1;
+      self._abandonaSala();
       self.showScreen('difficulty');
     });
     s.appendChild(play);
+
+    var online = el('button', 'btn btn-big btn-online', 'Jugar online · 1vs1');
+    online.addEventListener('click', function () {
+      self.sound.play('click');
+      self.mode = 'online';
+      self._resetSala();
+      self.showScreen('sala');
+    });
+    s.appendChild(online);
 
     var help = el('button', 'btn btn-ghost', 'Cómo se juega');
     help.addEventListener('click', function () {
@@ -321,6 +343,195 @@
     s.appendChild(el('p', 'title-credit',
       'Concepto original de Ubisoft© en Assassin’s Creed Valhalla®'));
   };
+
+  // ---- Sala online ----
+
+  OrlogUI.prototype._buildSala = function () {
+    var self = this;
+    var s = this.screens.sala;
+    s.innerHTML = '';
+    s.appendChild(el('h2', 'screen-head', 'Jugar online'));
+    s.appendChild(el('p', 'screen-sub',
+      'Crea una sala y pásale el código a tu rival, o entra con el código que te hayan dado.'));
+
+    var panel = el('div', 'sala-panel');
+
+    // — crear —
+    var bloqueCrear = el('div', 'sala-bloque');
+    bloqueCrear.appendChild(el('h3', 'sala-h3', 'Crear una sala'));
+    var btnCrear = el('button', 'btn btn-primary', 'Crear sala');
+    btnCrear.addEventListener('click', function () {
+      self.sound.play('click');
+      self._creaSala();
+    });
+    bloqueCrear.appendChild(btnCrear);
+    panel.appendChild(bloqueCrear);
+
+    panel.appendChild(el('div', 'sala-o', 'o'));
+
+    // — unirse —
+    var bloqueUnir = el('div', 'sala-bloque');
+    bloqueUnir.appendChild(el('h3', 'sala-h3', 'Entrar con un código'));
+    var fila = el('div', 'sala-join');
+    this.salaInput = el('input', 'sala-input');
+    this.salaInput.setAttribute('placeholder', 'ABC123');
+    this.salaInput.setAttribute('maxlength', '6');
+    this.salaInput.setAttribute('aria-label', 'Código de la sala');
+    this.salaInput.setAttribute('autocomplete', 'off');
+    this.salaInput.addEventListener('input', function () {
+      this.value = window.OrlogRed.normalizaCodigo(this.value);
+    });
+    this.salaInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') btnUnir.click();
+    });
+    var btnUnir = el('button', 'btn btn-primary', 'Entrar');
+    btnUnir.addEventListener('click', function () {
+      var code = window.OrlogRed.normalizaCodigo(self.salaInput.value);
+      if (code.length !== 6) {
+        self.salaEstado.textContent = 'El código tiene 6 caracteres.';
+        self.salaEstado.className = 'sala-estado error';
+        return;
+      }
+      self.sound.play('click');
+      self._entraSala(code);
+    });
+    fila.appendChild(this.salaInput);
+    fila.appendChild(btnUnir);
+    bloqueUnir.appendChild(fila);
+    panel.appendChild(bloqueUnir);
+
+    s.appendChild(panel);
+
+    // — código generado + estado —
+    this.salaCodigoCaja = el('div', 'sala-codigo-caja');
+    this.salaCodigoCaja.style.display = 'none';
+    s.appendChild(this.salaCodigoCaja);
+
+    this.salaEstado = el('p', 'sala-estado', '');
+    s.appendChild(this.salaEstado);
+
+    var volver = el('button', 'btn btn-ghost', 'Volver');
+    volver.addEventListener('click', function () {
+      self.sound.play('click');
+      self._abandonaSala();
+      self.showScreen('title');
+    });
+    s.appendChild(volver);
+  };
+
+  OrlogUI.prototype._resetSala = function () {
+    this.salaCodigoCaja.style.display = 'none';
+    this.salaCodigoCaja.innerHTML = '';
+    this.salaEstado.textContent = '';
+    this.salaEstado.className = 'sala-estado';
+    this.salaInput.value = '';
+    this._abandonaSala();
+  };
+
+  OrlogUI.prototype._abandonaSala = function () {
+    if (this.net) {
+      this.net.salir();
+      this.net = null;
+    }
+    this.sala = null;
+  };
+
+  OrlogUI.prototype._estadoSala = function (txt, clase) {
+    this.salaEstado.textContent = txt;
+    this.salaEstado.className = 'sala-estado ' + (clase || '');
+  };
+
+  // Conecta y espera al rival. soyAnfitrion decide quién es el jugador 0.
+  OrlogUI.prototype._conecta = function (codigo, soyAnfitrion) {
+    var self = this;
+    this.sala = codigo;
+    this.me = soyAnfitrion ? 0 : 1;
+    this.foe = soyAnfitrion ? 1 : 0;
+    this.foeName = 'Rival';
+    this.net = new window.OrlogRed.Net();
+
+    return this.net.conectar(codigo, soyAnfitrion, {
+      onRival: function (presente) { self._rivalCambia(presente); },
+      onMensaje: function (msg) { self._mensajeSuelto(msg); }
+    });
+  };
+
+  OrlogUI.prototype._creaSala = function () {
+    var self = this;
+    var codigo = window.OrlogRed.codigoSala();
+    this._estadoSala('Abriendo la sala…');
+    this._conecta(codigo, true).then(function () {
+      self.salaCodigoCaja.style.display = '';
+      self.salaCodigoCaja.innerHTML =
+        '<span class="sala-codigo-label">Código de la sala</span>' +
+        '<span class="sala-codigo">' + codigo + '</span>' +
+        '<span class="sala-codigo-hint">Pásaselo a tu rival</span>';
+      var copiar = el('button', 'btn btn-ghost btn-copiar', 'Copiar código');
+      copiar.addEventListener('click', function () {
+        var listo = function () { copiar.textContent = '¡Copiado!'; self.sound.play('tick'); };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(codigo).then(listo, function () { });
+        }
+      });
+      self.salaCodigoCaja.appendChild(copiar);
+      self._estadoSala('Esperando a que entre tu rival…', 'esperando');
+    }).catch(function (e) {
+      self._estadoSala('No se pudo abrir la sala: ' + e.message, 'error');
+      self._abandonaSala();
+    });
+  };
+
+  OrlogUI.prototype._entraSala = function (codigo) {
+    var self = this;
+    this._estadoSala('Entrando en la sala ' + codigo + '…');
+    this._conecta(codigo, false).then(function () {
+      self._estadoSala('Conectado. Buscando al anfitrión…', 'esperando');
+      // si en unos segundos no hay nadie, el código seguramente no existe
+      setTimeout(function () {
+        if (self.net && !self.net.rivalPresente) {
+          self._estadoSala('No hay nadie en la sala ' + codigo +
+            '. ¿Seguro que el código es correcto?', 'error');
+        }
+      }, 4000);
+    }).catch(function (e) {
+      self._estadoSala('No se pudo entrar: ' + e.message, 'error');
+      self._abandonaSala();
+    });
+  };
+
+  // El rival aparece o desaparece de la sala
+  OrlogUI.prototype._rivalCambia = function (presente) {
+    var self = this;
+    if (this.mode !== 'online') return;
+    var enSala = this.screens.sala.classList.contains('active');
+
+    if (presente) {
+      if (enSala) {
+        this._estadoSala('¡Rival encontrado! Elegid vuestros dioses…', 'ok');
+        this.sound.play('coin');
+        setTimeout(function () {
+          if (!self.net) return; // por si se salió mientras tanto
+          self._resetDraft();
+          self.showScreen('draft');
+        }, 900);
+      }
+      return;
+    }
+
+    // Se ha ido: el aviso depende de dónde estemos
+    if (enSala) {
+      this._estadoSala('Tu rival ha salido de la sala.', 'error');
+      return;
+    }
+    if (this.screens.end.classList.contains('active')) return; // la partida ya acabó
+    var enPartida = this.engine && this.engine.getState().phase !== 'gameover';
+    if (this.screens.draft.classList.contains('active') || enPartida) {
+      this.rivalSeFue = true;
+      this.showAbandono();
+    }
+  };
+
+  OrlogUI.prototype._mensajeSuelto = function () { /* los espera el bucle */ };
 
   OrlogUI.prototype.openHelp = function () {
     var self = this;
@@ -394,7 +605,7 @@
       c.addEventListener('click', function () {
         self.sound.play('click');
         self.difficulty = d.id;
-        self.aiName = DIFF_NAME[d.id];
+        self.foeName = DIFF_NAME[d.id];
         self._resetDraft();
         self.showScreen('draft');
       });
@@ -477,24 +688,66 @@
   };
 
   OrlogUI.prototype._startMatchFromDraft = function () {
-    var humanGods = this.draftPick.slice();
-    var aiGods = window.OrlogAI.pickGods(this.difficulty);
-    this.lastConfig = { humanGods: humanGods, aiGods: aiGods };
-    this.startMatch();
+    var self = this;
+    var mis = this.draftPick.slice();
+
+    if (this.mode === 'ai') {
+      var g = [];
+      g[this.me] = mis;
+      g[this.foe] = window.OrlogAI.pickGods(this.difficulty);
+      this.lastConfig = { gods: g };
+      this.startMatch();
+      return;
+    }
+
+    // Online: intercambiamos dioses y el anfitrión fija el azar de la partida.
+    this.draftGo.disabled = true;
+    this.draftGo.textContent = 'Esperando al rival…';
+
+    this.net.enviar({ tipo: 'dioses', gods: mis });
+    this.net.espera('dioses').then(function (msg) {
+      var gods = [];
+      gods[self.me] = mis;
+      gods[self.foe] = msg.gods;
+
+      if (self.me === 0) {
+        // La misma semilla en ambos navegadores = los mismos dados sin mandarlos.
+        var seed = window.OrlogRed.semillaAleatoria();
+        var first = Math.random() < 0.5 ? 0 : 1;
+        self.lastConfig = { gods: gods, seed: seed, firstPlayer: first };
+        return self.net.enviar({ tipo: 'inicio', seed: seed, firstPlayer: first })
+          .then(function () { self.startMatch(); });
+      }
+      return self.net.espera('inicio').then(function (m) {
+        self.lastConfig = { gods: gods, seed: m.seed, firstPlayer: m.firstPlayer };
+        self.startMatch();
+      });
+    }).catch(function (e) {
+      self.draftGo.disabled = false;
+      self.draftGo.textContent = 'Al combate';
+      self.toast('No se pudo empezar: ' + e.message, 'fail');
+    });
   };
 
   OrlogUI.prototype.startMatch = function () {
     var cfg = this.lastConfig;
-    this.engine = new window.OrlogEngine({
-      names: ['Tú', this.aiName],
-      gods: [cfg.humanGods.slice(), cfg.aiGods.slice()]
-    });
+    var opts = { names: [], gods: [cfg.gods[0].slice(), cfg.gods[1].slice()] };
+    opts.names[this.me] = 'Tú';
+    opts.names[this.foe] = this.foeName;
+    if (cfg.seed != null) opts.rng = window.OrlogRed.rngConSemilla(cfg.seed);
+    if (cfg.firstPlayer != null) opts.firstPlayer = cfg.firstPlayer;
+
+    this.engine = new window.OrlogEngine(opts);
+    this.rivalSeFue = false;
     this.mirror = { health: [15, 15], tokens: [0, 0] };
     this.stats = { dmg: [0, 0], rounds: 1 };
     this.buildBoard();
     this.showScreen('board');
-    var names = cfg.aiGods.map(function (id) { return this.GODS.get(id).god; }, this).join(', ');
-    this.log('El ' + this.aiName + ' se encomienda a: ' + names + '.');
+    var names = cfg.gods[this.foe].map(function (id) {
+      return this.GODS.get(id).god;
+    }, this).join(', ');
+    this.log('El ' + this.foeName + ' se encomienda a: ' + names + '.');
+    this.draftGo.textContent = 'Al combate';
     this.runGame();
   };
 
@@ -511,10 +764,10 @@
 
     function mkSide(p) {
       var pl = st.players[p];
-      var root = el('div', 'side ' + (p === 0 ? 'side-human' : 'side-ai'));
+      var root = el('div', 'side ' + (p === self.me ? 'side-human' : 'side-ai'));
 
       var head = el('div', 'side-head');
-      head.appendChild(el('span', 'pname', p === 0 ? 'Tú' : self.aiName));
+      head.appendChild(el('span', 'pname', p === self.me ? 'Tú' : self.foeName));
       var tokenWrap = el('span', 'token-wrap',
         '<span class="token-coin"></span><span class="token-count">0</span>');
       head.appendChild(tokenWrap);
@@ -563,9 +816,12 @@
       };
     }
 
-    var aiSide = mkSide(1);
-    var humanSide = mkSide(0);
-    this.sides = [humanSide, aiSide];
+    // sides va indexado por índice del motor, pero se pinta con el rival arriba
+    var ladoRival = mkSide(this.foe);
+    var ladoMio = mkSide(this.me);
+    this.sides = [];
+    this.sides[this.me] = ladoMio;
+    this.sides[this.foe] = ladoRival;
 
     var center = el('div', 'board-center');
     this.roundEl = el('div', 'round-ind', 'Ronda 1');
@@ -577,9 +833,9 @@
     center.appendChild(this.actionsEl);
     center.appendChild(this.logEl);
 
-    s.appendChild(aiSide.root);
+    s.appendChild(ladoRival.root);
     s.appendChild(center);
-    s.appendChild(humanSide.root);
+    s.appendChild(ladoMio.root);
 
     // dados iniciales
     for (var p = 0; p < 2; p++) {
@@ -619,7 +875,7 @@
 
     this.setDieFaces(d, die.face || 'axe', false);
 
-    if (p === 0) {
+    if (p === self.me) {
       d.setAttribute('role', 'button');
       d.tabIndex = 0;
       d.addEventListener('click', function () { self._onDieClick(die.id); });
@@ -659,8 +915,8 @@
     } catch (e) { return; } // dado no togglable (p. ej. kept de tiradas previas)
     var st = this.engine.getState();
     var die = null;
-    st.players[0].dice.forEach(function (d) { if (d.id === dieId) die = d; });
-    var elDie = this.dieEl(0, dieId);
+    st.players[this.me].dice.forEach(function (d) { if (d.id === dieId) die = d; });
+    var elDie = this.dieEl(this.me, dieId);
     if (elDie && die) {
       elDie.classList.toggle('pre-kept', !!die.kept);
       this.sound.play('tick');
@@ -951,7 +1207,7 @@
       '<div class="invoke-rune">' + god.rune + '</div>' +
       '<div class="invoke-name">' + god.name + '</div>' +
       '<div class="invoke-level">Nivel ' + ROMAN[(level || 1) - 1] + ' · ' +
-      (p === 0 ? 'tu invocación' : this.aiName) + '</div>';
+      (p === self.me ? 'tu invocación' : this.foeName) + '</div>';
     document.body.appendChild(o);
     this.sound.play('invoke');
     return wait(this.ms(1200)).then(function () {
@@ -992,7 +1248,8 @@
 
       var next;
       if (st.phase === 'roll') {
-        next = (st.activePlayer === 0) ? self.humanRollTurn() : self.aiRollTurn();
+        if (st.activePlayer === self.me) next = self.humanRollTurn();
+        else next = (self.mode === 'online') ? self.remoteRollTurn() : self.aiRollTurn();
       } else if (st.phase === 'favor') {
         next = self.playFavorPhase();
       } else if (st.phase === 'resolution') {
@@ -1023,7 +1280,7 @@
     return this.waitAction([{ id: 'roll', label: 'Tirar los dados', cls: 'btn-primary' }])
       .then(function () {
         self.engine.roll();
-        return self.animateRollBatch(0);
+        return self.animateRollBatch(self.me);
       })
       .then(function () {
         var st2 = self.engine.getState();
@@ -1038,22 +1295,67 @@
       })
       .then(function (choice) {
         self.keepSelectable = false;
+        // los ids elegidos hay que leerlos antes de endTurn (borra justRolled)
+        var keeps = self.engine.getState().players[self.me].dice
+          .filter(function (d) { return d.justRolled && d.kept; })
+          .map(function (d) { return d.id; });
         if (choice === 'all') self.engine.keepAll();
         else self.engine.endTurn();
-        self.syncDice(0);
+        if (self.mode === 'online') {
+          self.net.enviar({ tipo: 'turno', keeps: keeps, all: choice === 'all' });
+        }
+        self.syncDice(self.me);
         return wait(self.ms(380));
       });
+  };
+
+  // Gemelo de aiRollTurn: las decisiones llegan por la red en vez de calcularse.
+  // La tirada NO viaja: ambos motores comparten semilla y sacan las mismas caras.
+  OrlogUI.prototype.remoteRollTurn = function () {
+    var self = this;
+    var st = this.engine.getState();
+    this.setBanner('Ronda ' + st.round + ' · Tirada ' + st.rollNum + '/3 · <b>' +
+      this.foeName + '</b> está decidiendo…');
+
+    return this.net.espera('turno').then(function (msg) {
+      self.engine.roll();
+      return self.animateRollBatch(self.foe).then(function () { return msg; });
+    }).then(function (msg) {
+      return wait(self.ms(450)).then(function () { return msg; });
+    }).then(function (msg) {
+      var keeps = (msg.keeps || []).slice();
+      var chain = Promise.resolve();
+      keeps.forEach(function (id) {
+        chain = chain.then(function () {
+          try { self.engine.toggleKeep(id); } catch (e) { return; }
+          var d = self.dieEl(self.foe, id);
+          if (d) d.classList.add('pre-kept');
+          self.sound.play('tick');
+          return wait(self.ms(240));
+        });
+      });
+      return chain.then(function () {
+        if (msg.all) self.engine.keepAll();
+        else self.engine.endTurn();
+        self.syncDice(self.foe);
+        if (keeps.length) {
+          self.log('El ' + self.foeName + ' se queda ' + keeps.length +
+            (keeps.length === 1 ? ' dado.' : ' dados.'));
+        }
+        return wait(self.ms(380));
+      });
+    });
   };
 
   OrlogUI.prototype.aiRollTurn = function () {
     var self = this;
     var st = this.engine.getState();
     this.setBanner('Ronda ' + st.round + ' · Tirada ' + st.rollNum + '/3 · <b>' +
-      this.aiName + '</b> lanza sus dados…');
+      this.foeName + '</b> lanza sus dados…');
     return wait(this.ms(600))
       .then(function () {
         self.engine.roll();
-        return self.animateRollBatch(1);
+        return self.animateRollBatch(self.foe);
       })
       .then(function () { return wait(self.ms(550)); })
       .then(function () {
@@ -1076,9 +1378,9 @@
           return wait(self.ms(350)).then(function () {
             if (dec && dec.stopRolling) self.engine.keepAll();
             else self.engine.endTurn();
-            self.syncDice(1);
+            self.syncDice(self.foe);
             if (keeps.length) {
-              self.log('El ' + self.aiName + ' se queda ' + keeps.length +
+              self.log('El ' + self.foeName + ' se queda ' + keeps.length +
                 (keeps.length === 1 ? ' dado.' : ' dados.'));
             }
             return wait(self.ms(400));
@@ -1087,8 +1389,53 @@
       });
   };
 
+  // Online: ambos eligen a la vez y en secreto; los favores se cruzan al cerrar.
+  OrlogUI.prototype.playFavorPhaseOnline = function () {
+    var self = this;
+    var st = this.engine.getState();
+    this.setBanner('Ronda ' + st.round + ' · <b>Favor de los dioses</b> — elige tu ofrenda');
+    var mio = null;
+
+    return this.openFavorPanel().then(function (pick) {
+      mio = pick;
+      self.net.enviar({ tipo: 'favor', pick: pick || null });
+      if (pick) {
+        self.markArmed(self.me, true);
+        self.log('Tu favor queda armado, boca abajo.');
+      } else {
+        self.log('No invocas a los dioses esta ronda.');
+      }
+      self.setBanner('Ronda ' + st.round + ' · <b>Favor de los dioses</b> — esperando a ' +
+        self.foeName + '…');
+      return self.net.espera('favor');
+    }).then(function (msg) {
+      var suyo = msg.pick || null;
+      // Se aplican en orden fijo (0 y luego 1) para que ambos motores coincidan.
+      var favores = [];
+      favores[self.me] = mio;
+      favores[self.foe] = suyo;
+      for (var i = 0; i < 2; i++) {
+        var f = favores[i];
+        try {
+          if (f) self.engine.selectFavor(i, f.godId, f.level);
+          else self.engine.selectFavor(i, null, 1);
+        } catch (e) {
+          self.engine.selectFavor(i, null, 1);
+        }
+      }
+      if (suyo) {
+        self.markArmed(self.foe, true);
+        self.log('El ' + self.foeName + ' ha sellado un favor en secreto.');
+      } else {
+        self.log('El ' + self.foeName + ' no invoca a los dioses.');
+      }
+      return wait(self.ms(400));
+    });
+  };
+
   OrlogUI.prototype.playFavorPhase = function () {
     var self = this;
+    if (this.mode === 'online') return this.playFavorPhaseOnline();
     var st = this.engine.getState();
     this.setBanner('Ronda ' + st.round + ' · <b>Favor de los dioses</b> — elige tu ofrenda');
 
@@ -1103,15 +1450,15 @@
         if (aiFav && aiFav.godId) {
           self.engine.selectFavor(1, aiFav.godId, aiFav.level || 1);
           self.markArmed(1, true);
-          self.log('El ' + self.aiName + ' ha sellado un favor en secreto.');
+          self.log('El ' + self.foeName + ' ha sellado un favor en secreto.');
         } else {
           self.engine.selectFavor(1, null, 1);
-          self.log('El ' + self.aiName + ' no invoca a los dioses.');
+          self.log('El ' + self.foeName + ' no invoca a los dioses.');
         }
       } catch (e) {
         // si la IA eligió algo impagable, pasa
         try { self.engine.selectFavor(1, null, 1); } catch (e2) { }
-        self.log('El ' + self.aiName + ' no invoca a los dioses.');
+        self.log('El ' + self.foeName + ' no invoca a los dioses.');
       }
       return self.openFavorPanel();
     }).then(function (pick) {
@@ -1131,7 +1478,7 @@
     var self = this;
     return new Promise(function (res) {
       var st = self.engine.getState();
-      var tokens = st.players[0].tokens;
+      var tokens = st.players[self.me].tokens;
 
       var ov = el('div', 'overlay favor-overlay');
       var panel = el('div', 'favor-panel');
@@ -1140,7 +1487,7 @@
         'Favor disponible: <span class="cost">✦' + tokens + '</span>'));
 
       var row = el('div', 'favor-row');
-      st.players[0].gods.forEach(function (gid) {
+      st.players[self.me].gods.forEach(function (gid) {
         var g = self.GODS.get(gid);
         var card = el('div', 'favor-card');
         card.style.setProperty('--god-color', g.color);
@@ -1228,13 +1575,20 @@
     var np = null;
     try { np = this.engine.needsOdinPrompt(); } catch (e) { }
     var sac = {};
-    if (np && np.player === 0) {
-      pre = this.openOdinDialog(np.maxSacrifice).then(function (n) { sac[0] = n; });
-    } else if (np && np.player === 1) {
-      try {
-        sac[1] = window.OrlogAI.decideOdinSacrifice(this.engine.getState(), 1);
-      } catch (e) { sac[1] = 0; }
-      pre = Promise.resolve();
+    if (np && np.player === this.me) {
+      pre = this.openOdinDialog(np.maxSacrifice).then(function (n) {
+        sac[self.me] = n;
+        if (self.mode === 'online') return self.net.enviar({ tipo: 'odin', n: n });
+      });
+    } else if (np && np.player === this.foe) {
+      if (this.mode === 'online') {
+        pre = this.net.espera('odin').then(function (m) { sac[self.foe] = m.n | 0; });
+      } else {
+        try {
+          sac[this.foe] = window.OrlogAI.decideOdinSacrifice(this.engine.getState(), this.foe);
+        } catch (e) { sac[this.foe] = 0; }
+        pre = Promise.resolve();
+      }
     } else {
       pre = Promise.resolve();
     }
@@ -1297,9 +1651,9 @@
         return this.flyCoins(els.length ? els : [target], target, Math.min(ev.amount, 6))
           .then(function () {
             self.addTokens(ev.player, ev.amount);
-            self.log(ev.player === 0
+            self.log(ev.player === self.me
               ? 'Ganas ' + ev.amount + ' de favor por tus caras doradas.'
-              : 'El ' + self.aiName + ' gana ' + ev.amount + ' de favor dorado.');
+              : 'El ' + self.foeName + ' gana ' + ev.amount + ' de favor dorado.');
             els.forEach(function (e) { e.classList.remove('gold-burst'); });
             return wait(self.ms(250));
           });
@@ -1309,7 +1663,7 @@
         var god = GODS.get(ev.godId);
         this.revealArmed(ev.player, ev.godId);
         return this.showInvokeBanner(god, ev.level, ev.player).then(function () {
-          self.log((ev.player === 0 ? 'Invocas ' : 'El ' + self.aiName + ' invoca ') +
+          self.log((ev.player === self.me ? 'Invocas ' : 'El ' + self.foeName + ' invoca ') +
             god.name + ' (nivel ' + ROMAN[(ev.level || 1) - 1] + ').');
         });
       }
@@ -1322,7 +1676,7 @@
           ? 'cancelado por Thrymr'
           : 'favor insuficiente';
         return this.toast(
-          (ev.player === 0 ? 'Tu favor ' : 'El favor rival ') +
+          (ev.player === self.me ? 'Tu favor ' : 'El favor rival ') +
           (godF ? '(' + godF.name + ') ' : '') + 'falla: ' + why, 'fail');
       }
 
@@ -1340,7 +1694,7 @@
             self.addTokens(thief, ev.amount);
             self.log(thief === 0
               ? 'Tus manos roban ' + ev.amount + ' de favor.'
-              : 'El ' + self.aiName + ' te roba ' + ev.amount + ' de favor.');
+              : 'El ' + self.foeName + ' te roba ' + ev.amount + ' de favor.');
             return wait(self.ms(250));
           });
       }
@@ -1363,13 +1717,13 @@
           return this.flyCoins([from], this.side(p2).tokenEl, Math.min(ev.amount, 5))
             .then(function () {
               self.addTokens(p2, ev.amount);
-              self.log((p2 === 0 ? 'Ganas ' : 'El ' + self.aiName + ' gana ') +
+              self.log((p2 === self.me ? 'Ganas ' : 'El ' + self.foeName + ' gana ') +
                 ev.amount + ' de favor' + (srcName ? ' (' + srcName + ')' : '') + '.');
               return wait(self.ms(250));
             });
         }
         this.addTokens(p2, ev.amount);
-        this.log((p2 === 0 ? 'Pierdes ' : 'El ' + this.aiName + ' pierde ') +
+        this.log((p2 === self.me ? 'Pierdes ' : 'El ' + this.foeName + ' pierde ') +
           (-ev.amount) + ' de favor' + (srcName ? ' (' + srcName + ')' : '') + '.');
         return wait(this.ms(450));
       }
@@ -1380,9 +1734,9 @@
         this.sound.play('gong');
         while (this.mirror.health[ev.player] > 0 && this.breakStone(ev.player)) { /* rompe todo */ }
         this.setHealth(ev.player, 0);
-        this.log(ev.player === 0
+        this.log(ev.player === self.me
           ? 'Caes. Los cuervos descienden.'
-          : 'El ' + this.aiName + ' cae. Los cuervos descienden.');
+          : 'El ' + this.foeName + ' cae. Los cuervos descienden.');
         return wait(self.ms(900));
       }
 
@@ -1423,7 +1777,7 @@
     }
     return chain.then(function () {
       var src = sourceGod ? ' (' + self.godName(sourceGod) + ')' : '';
-      self.log((p === 0 ? 'Recuperas ' : 'El ' + self.aiName + ' recupera ') +
+      self.log((p === self.me ? 'Recuperas ' : 'El ' + self.foeName + ' recupera ') +
         amount + ' de vida' + src + '.');
       return wait(self.ms(300));
     });
@@ -1437,9 +1791,9 @@
     if (!ev.amount) {
       this.sound.play('block');
       this.flashSide(p, 'block');
-      this.log(p === 0
+      this.log(p === self.me
         ? 'Bloqueas todo el ataque.'
-        : 'El ' + this.aiName + ' bloquea todo el ataque.');
+        : 'El ' + this.foeName + ' bloquea todo el ataque.');
       return wait(this.ms(650));
     }
 
@@ -1454,7 +1808,7 @@
     return wait(this.ms(230)).then(function () {
       self.sound.play('thud');
       self.shakeSide(p);
-      if (p === 0) self.flashVignette();
+      if (p === self.me) self.flashVignette();
       else self.flashSide(1, 'hit');
 
       self.stats.dmg[p] += ev.amount;
@@ -1473,7 +1827,7 @@
       if (ev.blocked) bits.push(ev.blocked + ' bloqueado');
       if (bd.pierced) bits.push(bd.pierced + (bd.pierced === 1 ? ' flecha perfora' : ' flechas perforan') + ' escudos');
       var extra = bits.length ? ' (' + bits.join(', ') + ')' : '';
-      self.log((p === 0 ? 'Sufres ' : 'El ' + self.aiName + ' sufre ') +
+      self.log((p === self.me ? 'Sufres ' : 'El ' + self.foeName + ' sufre ') +
         ev.amount + ' de daño' + extra + '.');
       attackers.forEach(function (e) { e.classList.remove(dir); });
       return wait(self.ms(380));
@@ -1496,7 +1850,7 @@
         });
         self.log(self.godName(ev.godId) + ' anula ' + d.banned.length +
           (d.banned.length === 1 ? ' dado' : ' dados') +
-          (p === 0 ? ' rivales.' : ' tuyos.'));
+          (p === self.me ? ' rivales.' : ' tuyos.'));
         return wait(self.ms(750));
       });
     }
@@ -1581,7 +1935,7 @@
         self.sound.play('fail');
         self.addTokens(foe, -d.tokensDestroyed);
         self.log(self.godName(ev.godId) + ' destruye ' + d.tokensDestroyed +
-          ' de favor ' + (p === 0 ? 'rival.' : 'tuyo.'));
+          ' de favor ' + (p === self.me ? 'rival.' : 'tuyo.'));
         return wait(self.ms(600));
       });
     }
@@ -1593,7 +1947,7 @@
         return self.flyCoins([from], self.side(p).tokenEl, Math.min(d.tokensGained, 5))
           .then(function () {
             self.addTokens(p, d.tokensGained);
-            self.log((p === 0 ? 'Ganas ' : 'El ' + self.aiName + ' gana ') +
+            self.log((p === self.me ? 'Ganas ' : 'El ' + self.foeName + ' gana ') +
               d.tokensGained + ' de favor (' + self.godName(ev.godId) + ').');
             return wait(self.ms(250));
           });
@@ -1646,11 +2000,11 @@
     s.innerHTML = '';
 
     var word, sub, cls;
-    if (winner === 0) {
+    if (winner === this.me) {
       word = 'VICTORIA'; cls = 'end-win';
       sub = 'Los escaldos cantarán esta hazaña.';
       this.sound.play('win');
-    } else if (winner === 1) {
+    } else if (winner === this.foe) {
       word = 'DERROTA'; cls = 'end-lose';
       sub = 'Tus huesos alimentarán a los cuervos.';
       this.sound.play('lose');
@@ -1664,24 +2018,49 @@
     s.appendChild(el('p', 'end-sub', sub));
     s.appendChild(el('div', 'end-summary',
       '<span>Rondas: <b>' + this.stats.rounds + '</b></span>' +
-      '<span>Daño infligido: <b>' + this.stats.dmg[1] + '</b></span>' +
-      '<span>Daño recibido: <b>' + this.stats.dmg[0] + '</b></span>'));
+      '<span>Daño infligido: <b>' + this.stats.dmg[this.foe] + '</b></span>' +
+      '<span>Daño recibido: <b>' + this.stats.dmg[this.me] + '</b></span>'));
 
     var row = el('div', 'end-actions');
-    var again = el('button', 'btn btn-primary', 'Revancha');
-    again.addEventListener('click', function () {
-      self.sound.play('click');
-      self.startMatch();
-    });
+    // La revancha online exigiría volver a sincronizar a los dos; de momento, al menú.
+    if (this.mode === 'ai') {
+      var again = el('button', 'btn btn-primary', 'Revancha');
+      again.addEventListener('click', function () {
+        self.sound.play('click');
+        self.startMatch();
+      });
+      row.appendChild(again);
+    }
     var menu = el('button', 'btn btn-ghost', 'Menú');
     menu.addEventListener('click', function () {
       self.sound.play('click');
+      self._abandonaSala();
       self.showScreen('title');
     });
-    row.appendChild(again);
     row.appendChild(menu);
     s.appendChild(row);
 
+    this.showScreen('end');
+  };
+
+  // El rival cerró la pestaña o perdió la conexión a media partida
+  OrlogUI.prototype.showAbandono = function () {
+    var self = this;
+    this.gameToken++; // corta el bucle: ya no llegará ninguna decisión suya
+    var s = this.screens.end;
+    s.innerHTML = '';
+    this.sound.play('gong');
+    s.appendChild(el('div', 'end-word end-draw', 'SE HA IDO'));
+    s.appendChild(el('p', 'end-sub', 'Tu rival ha abandonado la sala. La partida queda deshecha.'));
+    var row = el('div', 'end-actions');
+    var menu = el('button', 'btn btn-primary', 'Volver al menú');
+    menu.addEventListener('click', function () {
+      self.sound.play('click');
+      self._abandonaSala();
+      self.showScreen('title');
+    });
+    row.appendChild(menu);
+    s.appendChild(row);
     this.showScreen('end');
   };
 

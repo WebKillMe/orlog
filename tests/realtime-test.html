@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Orlog — prueba de Realtime</title>
+<style>
+  body{background:#0b0f14;color:#e8e1d0;font:13px/1.6 monospace;padding:1rem}
+  .ok{color:#8fbf6f}.fail{color:#e05a3a;font-weight:bold}.info{opacity:.7}
+</style>
+</head>
+<body>
+<h1>Prueba de Realtime (canal orlog:*)</h1>
+<div id="out"></div>
+<script type="module">
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+
+const URL_SB = 'https://vknwuevlvnavkgvtguku.supabase.co';
+const KEY = 'sb_publishable_f7q0PeemTaEwN9XFotSSEA_kA_rqtz7';
+const out = document.getElementById('out');
+let pass = 0, fail = 0;
+const line = (cls, t) => { const d = document.createElement('div'); d.className = cls; d.textContent = t; out.appendChild(d); };
+const ok = (c, n) => { if (c) { pass++; line('ok', '✔ ' + n); } else { fail++; line('fail', '✘ ' + n); } };
+const wait = ms => new Promise(r => setTimeout(r, ms));
+
+function withTimeout(promise, ms, label) {
+  return Promise.race([promise, wait(ms).then(() => { throw new Error('timeout: ' + label); })]);
+}
+
+try {
+  line('info', 'Conectando dos clientes al mismo canal…');
+  const anfitrion = createClient(URL_SB, KEY);
+  const invitado  = createClient(URL_SB, KEY);
+  const SALA = 'orlog:TEST' + Math.floor(Math.random() * 9999);
+
+  // ── 1. suscripción de ambos ──
+  const recibidos = [];
+  const presencias = [];
+
+  const chA = anfitrion.channel(SALA, { config: { presence: { key: 'anfitrion' } } });
+  const chB = invitado.channel(SALA,  { config: { presence: { key: 'invitado'  } } });
+
+  chA.on('broadcast', { event: 'accion' }, ({ payload }) => recibidos.push(['A', payload]));
+  chB.on('broadcast', { event: 'accion' }, ({ payload }) => recibidos.push(['B', payload]));
+  chA.on('presence', { event: 'sync' }, () => presencias.push(Object.keys(chA.presenceState())));
+
+  const sub = ch => new Promise((res, rej) => {
+    ch.subscribe(status => {
+      if (status === 'SUBSCRIBED') res(status);
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') rej(new Error(status));
+    });
+  });
+
+  await withTimeout(sub(chA), 10000, 'suscripción anfitrión');
+  ok(true, 'el anfitrión se suscribe al canal');
+  await withTimeout(sub(chB), 10000, 'suscripción invitado');
+  ok(true, 'el invitado se suscribe al canal');
+
+  // ── 2. presencia (saber quién está en la sala) ──
+  await chA.track({ rol: 'anfitrion' });
+  await chB.track({ rol: 'invitado' });
+  await wait(1200);
+  const estado = chA.presenceState();
+  ok(Object.keys(estado).length === 2, 'presencia: el anfitrión ve a los 2 jugadores en la sala');
+
+  // ── 3. broadcast anfitrión → invitado (una tirada de dados) ──
+  await chA.send({ type: 'broadcast', event: 'accion', payload: { tipo: 'tirada', dados: ['axe','arrow','helmet'] } });
+  await wait(1000);
+  const enB = recibidos.filter(r => r[0] === 'B');
+  ok(enB.length === 1, 'el invitado recibe la tirada del anfitrión');
+  ok(enB.length > 0 && enB[0][1].dados.length === 3, 'el contenido del mensaje llega íntegro');
+
+  // ── 4. broadcast invitado → anfitrión (decisión de favor) ──
+  await chB.send({ type: 'broadcast', event: 'accion', payload: { tipo: 'favor', godId: 'thor', level: 2 } });
+  await wait(1000);
+  const enA = recibidos.filter(r => r[0] === 'A');
+  ok(enA.length === 1, 'el anfitrión recibe la decisión del invitado');
+
+  // ── 5. latencia de ida y vuelta ──
+  const t0 = performance.now();
+  await chA.send({ type: 'broadcast', event: 'accion', payload: { tipo: 'ping' } });
+  await wait(600);
+  const lat = Math.round(performance.now() - t0);
+  line('info', 'Latencia aproximada de entrega: ~' + lat + ' ms (incluye espera fija de 600 ms)');
+
+  // ── 6. aislamiento: otra sala no recibe nada ──
+  const otro = createClient(URL_SB, KEY);
+  const chC = otro.channel('orlog:OTRASALA');
+  let fuga = 0;
+  chC.on('broadcast', { event: 'accion' }, () => fuga++);
+  await withTimeout(sub(chC), 10000, 'suscripción otra sala');
+  await chA.send({ type: 'broadcast', event: 'accion', payload: { tipo: 'secreto' } });
+  await wait(1000);
+  ok(fuga === 0, 'aislamiento: una sala distinta NO recibe los mensajes');
+
+  await anfitrion.removeAllChannels();
+  await invitado.removeAllChannels();
+  await otro.removeAllChannels();
+
+} catch (e) {
+  fail++;
+  line('fail', '✘ EXCEPCIÓN: ' + (e && e.message ? e.message : e));
+}
+
+line(fail ? 'fail' : 'ok', '——— ' + pass + ' pasados, ' + fail + ' fallidos ———');
+document.title = fail ? '✘ Realtime falla' : '✔ Realtime OK';
+window.__RT = { pass, fail };
+</script>
+</body>
+</html>
